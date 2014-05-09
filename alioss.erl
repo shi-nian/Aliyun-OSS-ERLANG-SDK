@@ -1,57 +1,47 @@
 -module(alioss).
 
--compile(export_all).
+%-compile(export_all).
 
 -include_lib("xmerl/include/xmerl.hrl").
+-include_lib("kernel/include/file.hrl").
 
--define(KEY, "your-key").
--define(SECRET, "your-secret").
+-define(KEY, "").
+-define(SECRET, "").
 %-define(HOST, "oss-cn-hangzhou.aliyuncs.com").
 -define(HOST, "oss.aliyuncs.com").
 %-define(HOST, "www.test.local").
 
 -define(HTTPC_OPTION, [{sync, false},{headers_as_is, true}]).
 
-get_header() ->
-    get_header("GET", "/", "", ?HOST, "").
-
-get_header(M, R) ->
-    get_header(M, R, "", ?HOST, "").
-
-%get_header("GET", "/", Content_Type, Host, "0"),
-get_header(Method, Resource, Content_Type, Host, Content_Length) ->
-    CL = case Content_Length =:= "" of
-        true -> "0";
-        false -> be_list(Content_Length)
-    end,
-    Date = format_utc_timestamp(),
-    Authorization = "OSS " ++ ?KEY ++ ":" ++ signature(Method, Date, Resource, Content_Type),
-    A = io_lib:format("~s",[Authorization]),
-    %[{"Date", Date},{"Host",?HOST}, {"Authorization", A}].
-    Basic = [{"Date", Date}, {"Authorization", A}, {"Host", Host}, {"Content-Length", CL}],
-    case Content_Type =:= "" of
-        true -> Basic;
-        false -> [{"Content-Type", Content_Type} | Basic]
-    end.
-
-signature() ->
-    signature("GET", format_utc_timestamp()).
-
-signature(Method, Date) ->
-    signature(Method, Date, "/", "").
-
-signature(Method, Date, Resource, C) ->
-    Content_Type = C ++ "\n",
-    %Data = "GET\n\n\nThu, 08 May 2014 07:34:44 GMT\n/",
-    Data = Method ++ "\n\n"++ Content_Type ++ Date ++ "\n" ++ Resource,
-    erlang:display([?LINE, "signdata", Data]),
-    base64:encode(crypto:sha_mac(?SECRET, Data)).
 
 
+-export([bucket_list/0]).
+-export([bucket_create/0, bucket_create/1]).
+-export([bucket_delete/0, bucket_delete/1]).
+-export([bucket_getacl/0, bucket_getacl/1]).
+
+-export([object_list/0, object_list/1]).
+-export([object_get/0, object_get/2]).
+-export([object_put/0, object_put/3]).
+-export([object_delete/0, object_delete/2]).
+
+
+%%--------------------------------------------------------------------------------------------------------
+
+
+%%-------------------------------------------------------------------------------%%
+%%                                export func                                    %%
+%%-------------------------------------------------------------------------------%%
+%%
+%% delete object 
+%%
 object_delete() ->
-    inets:start(),
-    Source = "shopex-ecae-test",
     Object_key = "test/first.html",
+    Source = "shopex-ecae-test",
+    object_delete(Source, Object_key).
+
+object_delete(Source, Object_key) ->
+    inets:start(),
     URL = "http://"  ++ Source ++ "." ++ ?HOST ++ "/" ++ Object_key,
     Content_Type = "",
     Host = Source++"."++?HOST,
@@ -72,10 +62,16 @@ object_delete() ->
     ok.
 
 
+%% ---------------------------------------------------------------
+%% get object
+%% ---------------------------------------------------------------
 object_get() ->
-    inets:start(),
     Source = "shopex-ecae-test",
     Object_key = "test/first.html",
+    object_get(Source, Object_key).
+
+object_get(Source, Object_key) ->
+    inets:start(),
     URL = "http://"  ++ Source ++ "." ++ ?HOST ++ "/" ++ Object_key,
     Content_Type = "",
     Host = Source++"."++?HOST,
@@ -96,15 +92,25 @@ object_get() ->
     ok.
 
 
+%% ---------------------------------------------------------------
+%% put object
+%% ---------------------------------------------------------------
 object_put() ->
-    inets:start(),
+    File = "test.jpg",
     Source = "shopex-ecae-test",
-    Object_key = "test/first.html",
+    Object_key = "test/" ++ File,
+    object_put(Source, Object_key, File).
+
+object_put(Source, Object_key, File) ->
+    inets:start(),
+    {ok, Body} = file:read_file(File),
+    Length = filelib:file_size(File),
     URL = "http://"  ++ Source ++ "." ++ ?HOST ++ "/" ++ Object_key,
-    Content_Type = "text/html",
-    Body = "test put",
+    Content_Type = "image/jpeg",
+%    "image/jpeg",
+%    Body = "test put",
     Host = Source++"."++?HOST,
-    Headers = get_header("PUT", "/"++Source++"/"++Object_key, Content_Type, Host, erlang:length(Body)),
+    Headers = get_header("PUT", "/"++Source++"/"++Object_key, Content_Type, Host, Length),
     {ok, Request_id} = httpc:request(put, 
         {URL, Headers, Content_Type, Body},
         [], ?HTTPC_OPTION),
@@ -120,11 +126,50 @@ object_put() ->
     end,
     ok.
 
-
-
-bucket_delete() ->
-    inets:start(),
+%% ---------------------------------------------------------------
+%% get object
+%% ---------------------------------------------------------------
+object_list() ->
     Source = "shopex-ecae-test",
+    object_list(Source).
+
+object_list(Source) ->
+    inets:start(),
+    URL = "http://"  ++ Source ++ "." ++ ?HOST,
+    Content_Type = "",
+    Host = Source++"."++?HOST,
+    Headers = get_header("GET", "/" ++ Source ++"/", Content_Type, Host, ""),
+    {ok, Request_id} = httpc:request(get, 
+        {URL, Headers},
+        [], ?HTTPC_OPTION),
+    erlang:display(Request_id),
+    receive
+        {http, {Request_id, {{_, 200, _}, _, Output}}} ->
+            List = binary_to_list(Output),
+            List = binary_to_list(Output),
+            {Doc, _} = xmerl_scan:string(List),
+            AtomList = xmerl_xpath:string("/ListBucketResult/Contents/Key", Doc),
+            parse_xml(AtomList),
+
+            ok;
+        Out -> io:format("~p ~p ~n", [?LINE, Out])
+    after 10000 ->
+            io:format("[~p, ~p],get site list failed~n", [?LINE, ?MODULE])
+    end,
+    ok.
+
+
+
+
+%% ---------------------------------------------------------------
+%%  delete bucket
+%% ---------------------------------------------------------------
+bucket_delete()->
+    Source = "shopex-ecae-test",
+    bucket_delete(Source).
+
+bucket_delete(Source) ->
+    inets:start(),
     URL = "http://"  ++ Source ++ "." ++ ?HOST,
     Content_Type = "",
     Host = Source++"."++?HOST,
@@ -146,9 +191,15 @@ bucket_delete() ->
 
 
 
-bucket_getacl() ->
-    inets:start(),
+%% ---------------------------------------------------------------
+%%  get bucket acl
+%% ---------------------------------------------------------------
+bucket_getacl()->
     Source = "shopex-ecae-test",
+    bucket_getacl(Source).
+
+bucket_getacl(Source) ->
+    inets:start(),
     URL = "http://"  ++ Source ++ "." ++ ?HOST ++ "/?acl",
 
     Content_Type = "",
@@ -172,9 +223,16 @@ bucket_getacl() ->
     end,
     ok.
 
+
+%% ---------------------------------------------------------------
+%% create bucket
+%% ---------------------------------------------------------------
 bucket_create() ->
-    inets:start(),
     Source = "shopex-ecae-test",
+    bucket_create(Source).
+
+bucket_create(Source) ->
+    inets:start(),
     URL = "http://"  ++ Source ++ "." ++ ?HOST,
 
     Content_Type = "",
@@ -197,6 +255,9 @@ bucket_create() ->
     ok.
 
 
+%% ---------------------------------------------------------------
+%% list bucket
+%% ---------------------------------------------------------------
 bucket_list() ->
     inets:start(),
 
@@ -224,6 +285,57 @@ bucket_list() ->
     ok.
 
 
+%% private func
+%%----------------------------------------------------------------------------------------------------------------
+
+
+%%-------------------------------------------------------------------------------%%
+%%                                sign                                           %%
+%%-------------------------------------------------------------------------------%%
+get_header() ->
+    get_header("GET", "/", "", ?HOST, "").
+
+get_header(M, R) ->
+    get_header(M, R, "", ?HOST, "").
+
+%get_header("GET", "/", Content_Type, Host, "0"),
+%return httpc headers
+get_header(Method, Resource, Content_Type, Host, Content_Length) ->
+    CL = case Content_Length =:= "" of
+        true -> "0";
+        false -> be_list(Content_Length)
+    end,
+    Date = format_utc_timestamp(),
+    Authorization = "OSS " ++ ?KEY ++ ":" ++ signature(Method, Date, Resource, Content_Type),
+    A = io_lib:format("~s",[Authorization]),
+    %[{"Date", Date},{"Host",?HOST}, {"Authorization", A}].
+    Basic = [{"Date", Date}, {"Authorization", A}, {"Host", Host}, {"Content-Length", CL}],
+    case Content_Type =:= "" of
+        true -> Basic;
+        false -> [{"Content-Type", Content_Type} | Basic]
+    end.
+
+%%-------------------------------------------------------------------------------%%
+%%                              signature                                        %%
+%%-------------------------------------------------------------------------------%%
+signature() ->
+    signature("GET", format_utc_timestamp()).
+
+signature(Method, Date) ->
+    signature(Method, Date, "/", "").
+
+signature(Method, Date, Resource, C) ->
+    Content_Type = C ++ "\n",
+    %Data = "GET\n\n\nThu, 08 May 2014 07:34:44 GMT\n/",
+    Data = Method ++ "\n\n"++ Content_Type ++ Date ++ "\n" ++ Resource,
+    erlang:display([?LINE, "signdata", Data]),
+    base64:encode(crypto:sha_mac(?SECRET, Data)).
+
+
+
+%%-------------------------------------------------------------------------------%%
+%%                           parse xml data                                      %%
+%%-------------------------------------------------------------------------------%%
 parse_xml([]) ->
     ok;
 parse_xml([XmlElement | X]) ->
@@ -240,6 +352,8 @@ parse_xml([XmlElement | X]) ->
 
 
 
+%% GMT DATE
+%%
 format_utc_timestamp() ->  
     TS = {_,_,Micro} = os:timestamp(),  
     {{Year,Month,Day},{Hour,Minute,Second}} = calendar:now_to_universal_time(TS),  
